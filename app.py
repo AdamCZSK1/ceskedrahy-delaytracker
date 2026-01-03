@@ -3,11 +3,11 @@ import sqlite3
 import requests
 from datetime import datetime
 import psycopg2
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
 
-# ID stanice pro ČD (Plzeň hl.n. = 5473275)
+# ID stanice ČD (Plzeň hl.n. = 5473275)
 STATION_ID = "5473275"
 API_URL = f"https://www.cd.cz/stanice/{STATION_ID}/getopt"
 
@@ -23,6 +23,7 @@ def get_placeholder():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
+    # Tabulka se všemi sloupci
     c.execute('''CREATE TABLE IF NOT EXISTS zpozdeni
                  (cas TEXT, cislo_vlaku TEXT, dopravce TEXT, cilova_stanice TEXT, 
                   planovany_odjezd TEXT, aktualni_odjezd TEXT, meskani TEXT)''')
@@ -32,21 +33,15 @@ def init_db():
 @app.route('/update')
 def update_data():
     try:
-        # Nastavení požadavku pro ČD (tváříme se jako prohlížeč)
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         data = 'language=cs&isDeep=false&toHistory=false'
-        
         response = requests.post(API_URL, headers=headers, data=data)
         
-        if response.status_code != 200:
-            return f"Chyba ČD API: {response.status_code}", 500
+        if response.status_code != 200: return f"Chyba API: {response.status_code}", 500
 
         json_data = response.json()
         trains = json_data.get('Trains', [])
         
-        if not trains:
-            return "Žádné vlaky nenalezeny (nebo chyba API)", 500
-
         conn = get_db_connection()
         c = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -54,18 +49,15 @@ def update_data():
         
         count = 0
         for train in trains:
-            # Vytáhneme data z JSONu ČD
-            # ČD posílá čas jako "12:34", musíme k tomu přidat datum, pokud chybí,
-            # ale pro jednoduchost ukládáme, co pošlou.
-            
+            # Získání všech detailů
             cislo = train.get('TrainNumber', '??')
-            # ČD často spojuje název vlaku a číslo, zkusíme to vyčistit
-            dopravce = "ČD" # API ČD většinou ukazuje své vlaky, nebo partnery
+            # ČD posílá v TypeInfo např "R 1234 ...", zkusíme vzít jen typ
+            dopravce = train.get('TrainType', 'Vlak') 
             cil = train.get('TargetStation', '?')
             plan = train.get('Time', '?')
             meskani = str(train.get('Delay', 0))
             
-            # Výpočet aktuálního odjezdu (jen orientačně, textově)
+            # Pokud zpoždění > 0, vypočítáme "reálný čas" jen textově pro zobrazení
             aktual = f"{plan} (+{meskani} min)" if meskani != "0" else plan
 
             vals = (now, cislo, dopravce, cil, plan, aktual, meskani)
@@ -75,8 +67,7 @@ def update_data():
 
         conn.commit()
         conn.close()
-        return f"ÚSPĚCH! Uloženo {count} vlaků z ČD API.", 200
-        
+        return f"✅ ÚSPĚCH! Uloženo {count} vlaků (včetně detailů).", 200
     except Exception as e:
         return f"CHYBA: {str(e)}", 500
 
@@ -85,27 +76,58 @@ def index():
     try:
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT * FROM zpozdeni ORDER BY cas DESC LIMIT 50")
+        ph = get_placeholder()
+        
+        # --- FILTROVÁNÍ ---
+        filter_date = request.args.get('date')
+        filter_train = request.args.get('train')
+        
+        query = "SELECT * FROM zpozdeni WHERE 1=1"
+        params = []
+
+        if filter_date:
+            # Postgres vs SQLite syntaxe pro datum
+            if os.environ.get('DATABASE_URL'):
+                query += " AND cas::text LIKE %s"
+            else:
+                query += " AND cas LIKE ?"
+            params.append(f"{filter_date}%")
+            
+        if filter_train:
+            query += f" AND cislo_vlaku = {ph}"
+            params.append(filter_train)
+            
+        query += " ORDER BY cas DESC LIMIT 100"
+        
+        c.execute(query, tuple(params))
         rows = c.fetchall()
         conn.close()
         
         data = []
         for row in rows:
-            # Barvy
+            # Nastavení barev podle zpoždění
             try:
                 m = int(row[6])
-                color = "red" if m >= 15 else "orange" if m >= 5 else "green"
+                if m < 5: color = "text-green-600"
+                elif m < 15: color = "text-orange-500"
+                else: color = "text-red-600 font-bold"
             except:
-                color = "black"
+                color = "text-gray-600"
 
             data.append({
-                'cas': row[0], 'cislo': row[1], 'dopravce': row[2],
-                'cil': row[3], 'plan': row[4], 'aktual': row[5], 
-                'meskani': row[6], 'barva': color
+                'cas': row[0],        # Čas záznamu
+                'cislo': row[1],      # Číslo vlaku
+                'dopravce': row[2],   # Typ/Dopravce
+                'cil': row[3],        # Cílová stanice
+                'plan': row[4],       # Plánovaný odjezd
+                'aktual': row[5],     # Aktuální odjezd
+                'meskani': row[6],    # Minuty zpoždění
+                'color': color        # Barva pro CSS
             })
+            
         return render_template('index.html', data=data)
     except Exception as e:
-        return str(e)
+        return f"Chyba webu: {str(e)}"
 
 if __name__ == "__main__":
     init_db()
