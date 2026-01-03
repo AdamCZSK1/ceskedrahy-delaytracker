@@ -1,3 +1,5 @@
+flask
 requests
-APScheduler
-Flask
+beautifulsoup4
+psycopg2-binary
+gunicorn
