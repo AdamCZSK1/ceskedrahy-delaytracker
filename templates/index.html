@@ -3,52 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zpoždění Vlaků - Plzeň hl.n.</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; background-color: #f4f4f9; }
-        h1 { text-align: center; color: #333; }
-        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #007bff; color: white; }
-        tr:hover { background-color: #f1f1f1; }
-        .meskani { font-weight: bold; }
-        .refresh-btn { display: block; width: 200px; margin: 20px auto; padding: 10px; background: #28a745; color: white; text-align: center; text-decoration: none; border-radius: 5px; }
-    </style>
+    <title>Zpoždění Plzeň hl.n.</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
+<body class="bg-gray-100 text-gray-800 font-sans p-4">
 
-    <h1>Odjezdy - Plzeň hl.n.</h1>
-    
-    <a href="/update" class="refresh-btn">🔄 Stáhnout nová data</a>
+    <div class="max-w-6xl mx-auto bg-white shadow-lg rounded-lg p-6">
+        <h1 class="text-3xl font-bold text-center mb-6 text-blue-700">🚆 Zpoždění - Plzeň hl.n.</h1>
 
-    <table>
-        <thead>
-            <tr>
-                <th>Čas záznamu</th>
-                <th>Vlak</th>
-                <th>Dopravce</th>
-                <th>Cíl</th>
-                <th>Plánovaný</th>
-                <th>Aktuální</th>
-                <th>Zpoždění</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in data %}
-            <tr>
-                <td style="font-size: 0.8em; color: gray;">{{ row.cas }}</td>
-                <td><strong>{{ row.cislo }}</strong></td>
-                <td>{{ row.dopravce }}</td>
-                <td>{{ row.cil }}</td>
-                <td>{{ row.plan }}</td>
-                <td>{{ row.aktual }}</td>
-                <td class="meskani" style="color: {{ row.barva }};">
-                    {{ row.meskani }} min
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+        <form action="/" method="get" class="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200 flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="block text-sm font-bold mb-1">Datum:</label>
+                <input type="date" name="date" class="border p-2 rounded w-40">
+            </div>
+            <div>
+                <label class="block text-sm font-bold mb-1">Číslo vlaku:</label>
+                <input type="text" name="train" placeholder="např. 123" class="border p-2 rounded w-32">
+            </div>
+            <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">
+                🔍 Hledat
+            </button>
+            <a href="/" class="text-gray-500 underline ml-auto text-sm self-center">Zrušit filtr</a>
+        </form>
+
+        <div class="text-right mb-4">
+            <a href="/update" class="text-sm text-green-600 hover:underline">🔄 Vynutit stažení dat (Cron)</a>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full border-collapse border border-gray-300">
+                <thead class="bg-blue-600 text-white">
+                    <tr>
+                        <th class="p-3 text-left">Zaznamenáno</th>
+                        <th class="p-3 text-left">Vlak</th>
+                        <th class="p-3 text-left">Dopravce</th>
+                        <th class="p-3 text-left">Cíl</th>
+                        <th class="p-3 text-left">Čas odjezdu</th>
+                        <th class="p-3 text-left">Zpoždění</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-3 text-xs text-gray-500">{{ row.cas }}</td>
+                        <td class="p-3 font-bold">{{ row.cislo }}</td>
+                        <td class="p-3">{{ row.dopravce }}</td>
+                        <td class="p-3">{{ row.cil }}</td>
+                        <td class="p-3">
+                            <span class="block">{{ row.plan }}</span>
+                            {% if row.meskani != "0" %}
+                            <span class="text-xs text-gray-400">Aktuálně: {{ row.aktual }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="p-3 {{ row.color }}">
+                            {% if row.meskani == "0" %}
+                                načas
+                            {% else %}
+                                {{ row.meskani }} min
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if not data %}
+        <p class="text-center text-gray-500 mt-8">Žádná data k zobrazení. Zkus změnit filtr nebo stáhnout data.</p>
+        {% endif %}
+    </div>
 
 </body>
 </html>
