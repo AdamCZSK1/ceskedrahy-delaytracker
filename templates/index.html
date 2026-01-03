@@ -27,7 +27,7 @@
         </form>
 
         <div class="text-right mb-4">
-            <a href="/update" class="text-sm text-green-600 hover:underline">🔄 Vynutit stažení dat (Cron)</a>
+            <a href="/update" class="text-sm text-green-600 hover:underline">🔄 Vynutit stažení dat</a>
         </div>
 
         <div class="overflow-x-auto">
@@ -38,8 +38,8 @@
                         <th class="p-3 text-left">Vlak</th>
                         <th class="p-3 text-left">Dopravce</th>
                         <th class="p-3 text-left">Cíl</th>
-                        <th class="p-3 text-left">Čas odjezdu</th>
-                        <th class="p-3 text-left">Zpoždění</th>
+                        <th class="p-3 text-left">Odjezd</th>
+                        <th class="p-3 text-left">Stav</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -50,28 +50,10 @@
                         <td class="p-3">{{ row.dopravce }}</td>
                         <td class="p-3">{{ row.cil }}</td>
                         <td class="p-3">
-                            <span class="block">{{ row.plan }}</span>
-                            {% if row.meskani != "0" %}
-                            <span class="text-xs text-gray-400">Aktuálně: {{ row.aktual }}</span>
+                            <span class="block font-medium">{{ row.plan }}</span>
+                            {% if "načas" not in row.meskani_display %}
+                                <span class="text-xs text-gray-500">Aktuálně: {{ row.aktual }}</span>
                             {% endif %}
                         </td>
                         <td class="p-3 {{ row.color }}">
-                            {% if row.meskani == "0" %}
-                                načas
-                            {% else %}
-                                {{ row.meskani }} min
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        {% if not data %}
-        <p class="text-center text-gray-500 mt-8">Žádná data k zobrazení. Zkus změnit filtr nebo stáhnout data.</p>
-        {% endif %}
-    </div>
-
-</body>
-</html>
+                            {{ row.meskani_display }}
