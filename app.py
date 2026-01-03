@@ -23,7 +23,6 @@ def get_placeholder():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # Tabulka se všemi sloupci
     c.execute('''CREATE TABLE IF NOT EXISTS zpozdeni
                  (cas TEXT, cislo_vlaku TEXT, dopravce TEXT, cilova_stanice TEXT, 
                   planovany_odjezd TEXT, aktualni_odjezd TEXT, meskani TEXT)''')
@@ -31,47 +30,30 @@ def init_db():
     conn.close()
 
 def zjisti_dopravce(typ_info, cislo_vlaku):
-    """
-    Pokusí se zjistit dopravce z textového popisu (TypeInfo)
-    """
     info = str(typ_info).lower()
-    if "gw train" in info or "gwtr" in info:
-        return "GW Train"
-    if "arriva" in info or "arr" in info:
-        return "Arriva"
-    if "regiojet" in info or "rj" in info:
-        return "RegioJet"
-    if "alex" in info:
-        return "Alex"
-    if "laenderbahn" in info or "dlb" in info:
-        return "Die Länderbahn"
-    if "ažd" in info:
-        return "AŽD Praha"
-    
-    # Pokud jsme nic nenašli, jsou to pravděpodobně České dráhy
+    if "gw train" in info or "gwtr" in info: return "GW Train"
+    if "arriva" in info or "arr" in info: return "Arriva"
+    if "regiojet" in info or "rj" in info: return "RegioJet"
+    if "alex" in info: return "Alex"
+    if "laenderbahn" in info or "dlb" in info: return "Die Länderbahn"
+    if "ažd" in info: return "AŽD Praha"
     return "ČD"
 
 @app.route('/update')
 def update_data():
     try:
-        # Simulujeme prohlížeč
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0',
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         data = 'language=cs&isDeep=false&toHistory=false'
-        
         response = requests.post(API_URL, headers=headers, data=data)
         
-        if response.status_code != 200: 
-            return f"Chyba API ČD: {response.status_code}", 500
+        if response.status_code != 200: return f"Chyba API: {response.status_code}", 500
 
         json_data = response.json()
         trains = json_data.get('Trains', [])
         
-        if not trains:
-            return "API vrátilo prázdný seznam vlaků (změna formátu?)", 500
-
         conn = get_db_connection()
         c = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -79,47 +61,39 @@ def update_data():
         
         count = 0
         for train in trains:
-            # --- ZÍSKÁVÁNÍ DAT (Opravené klíče) ---
-            
-            # 1. Číslo vlaku
             cislo = train.get('TrainNumber', '??')
-            
-            # 2. Cílová stanice (ČD to má někdy jako 'Station', někdy 'TargetStation')
-            # Zkusíme obojí
-            cil = train.get('TargetStation')
-            if not cil:
-                cil = train.get('Station', 'Neznámá stanice')
-            
-            # 3. Čas odjezdu
+            cil = train.get('TargetStation') or train.get('Station', 'Neznámá')
             plan = train.get('Time', '--:--')
             
-            # 4. Zpoždění
-            meskani = str(train.get('Delay', 0))
-            if meskani == "None": meskani = "0"
+            # Získání zpoždění (může být i záporné = náskok)
+            try:
+                meskani_int = int(train.get('Delay', 0))
+            except:
+                meskani_int = 0
             
-            # 5. Dopravce (Detektivní práce)
-            # ČD posílá info např: "Os 7640 GW Train Regio a.s."
+            meskani_str = str(meskani_int)
+            
+            # Logika pro text "Aktuální odjezd"
+            if meskani_int > 0:
+                aktual = f"{plan} (+{meskani_int} min)"
+            elif meskani_int < 0:
+                aktual = f"{plan} (Náskok {abs(meskani_int)} min)"
+            else:
+                aktual = plan # Jede načas
+
             type_info = train.get('TypeInfo', '')
             dopravce = zjisti_dopravce(type_info, cislo)
 
-            # Výpočet zobrazení aktuálního času
-            if meskani != "0":
-                aktual = f"{plan} (+{meskani})"
-            else:
-                aktual = plan
-
-            # Uložení
-            vals = (now, cislo, dopravce, cil, plan, aktual, meskani)
-            
+            vals = (now, cislo, dopravce, cil, plan, aktual, meskani_str)
             c.execute(f"INSERT INTO zpozdeni VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})", vals)
             count += 1
 
         conn.commit()
         conn.close()
-        return f"✅ ÚSPĚCH! Staženo {count} vlaků.<br>Poslední vlak: {dopravce} {cislo} do {cil}", 200
+        return f"✅ ÚSPĚCH! Staženo {count} vlaků.", 200
         
     except Exception as e:
-        return f"CHYBA v kódu: {str(e)}", 500
+        return f"CHYBA: {str(e)}", 500
 
 @app.route('/')
 def index():
@@ -153,22 +127,33 @@ def index():
         
         data = []
         for row in rows:
+            meskani_text = "načas"
             try:
                 m = int(row[6])
-                if m < 5: color = "text-green-600"
-                elif m < 15: color = "text-orange-500"
-                else: color = "text-red-600 font-bold"
+                # BARVY A TEXTY
+                if m < 0: # Náskok
+                    color = "text-green-600 font-bold"
+                    meskani_text = f"Náskok {abs(m)} min"
+                elif m == 0: # Načas
+                    color = "text-green-600"
+                    meskani_text = "načas"
+                elif m < 5: # Malé zpoždění
+                    color = "text-green-600"
+                    meskani_text = f"{m} min"
+                elif m < 15: # Střední
+                    color = "text-orange-500 font-bold"
+                    meskani_text = f"{m} min"
+                else: # Velké
+                    color = "text-red-600 font-black"
+                    meskani_text = f"{m} min"
             except:
                 color = "text-gray-600"
+                meskani_text = "?"
 
             data.append({
-                'cas': row[0],
-                'cislo': row[1],
-                'dopravce': row[2],
-                'cil': row[3],
-                'plan': row[4],
-                'aktual': row[5],
-                'meskani': row[6],
+                'cas': row[0], 'cislo': row[1], 'dopravce': row[2],
+                'cil': row[3], 'plan': row[4], 'aktual': row[5],
+                'meskani_display': meskani_text, # Tohle pošleme do HTML
                 'color': color
             })
             
