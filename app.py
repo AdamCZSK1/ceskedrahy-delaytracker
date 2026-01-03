@@ -28,7 +28,7 @@ def create_connection(db_file):
 # Function to fetch data from the CzechRail database and put the relevant info in the db
 def data_fetcher():
     # Set API URL and set request details for past and future arrivals
-    API_URL = 'https://www.cd.cz/stanice/5453399/getopt'
+    API_URL = 'https://www.cd.cz/stanice/5473275/getopt'
     API_REQ = 'language=cs&isDeep=false&toHistory=false'
     API_REQ_PAST = 'language=cs&isDeep=false&toHistory=true'
 
