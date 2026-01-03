@@ -30,18 +30,48 @@ def init_db():
     conn.commit()
     conn.close()
 
+def zjisti_dopravce(typ_info, cislo_vlaku):
+    """
+    Pokusí se zjistit dopravce z textového popisu (TypeInfo)
+    """
+    info = str(typ_info).lower()
+    if "gw train" in info or "gwtr" in info:
+        return "GW Train"
+    if "arriva" in info or "arr" in info:
+        return "Arriva"
+    if "regiojet" in info or "rj" in info:
+        return "RegioJet"
+    if "alex" in info:
+        return "Alex"
+    if "laenderbahn" in info or "dlb" in info:
+        return "Die Länderbahn"
+    if "ažd" in info:
+        return "AŽD Praha"
+    
+    # Pokud jsme nic nenašli, jsou to pravděpodobně České dráhy
+    return "ČD"
+
 @app.route('/update')
 def update_data():
     try:
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        # Simulujeme prohlížeč
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
         data = 'language=cs&isDeep=false&toHistory=false'
+        
         response = requests.post(API_URL, headers=headers, data=data)
         
-        if response.status_code != 200: return f"Chyba API: {response.status_code}", 500
+        if response.status_code != 200: 
+            return f"Chyba API ČD: {response.status_code}", 500
 
         json_data = response.json()
         trains = json_data.get('Trains', [])
         
+        if not trains:
+            return "API vrátilo prázdný seznam vlaků (změna formátu?)", 500
+
         conn = get_db_connection()
         c = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -49,17 +79,36 @@ def update_data():
         
         count = 0
         for train in trains:
-            # Získání všech detailů
-            cislo = train.get('TrainNumber', '??')
-            # ČD posílá v TypeInfo např "R 1234 ...", zkusíme vzít jen typ
-            dopravce = train.get('TrainType', 'Vlak') 
-            cil = train.get('TargetStation', '?')
-            plan = train.get('Time', '?')
-            meskani = str(train.get('Delay', 0))
+            # --- ZÍSKÁVÁNÍ DAT (Opravené klíče) ---
             
-            # Pokud zpoždění > 0, vypočítáme "reálný čas" jen textově pro zobrazení
-            aktual = f"{plan} (+{meskani} min)" if meskani != "0" else plan
+            # 1. Číslo vlaku
+            cislo = train.get('TrainNumber', '??')
+            
+            # 2. Cílová stanice (ČD to má někdy jako 'Station', někdy 'TargetStation')
+            # Zkusíme obojí
+            cil = train.get('TargetStation')
+            if not cil:
+                cil = train.get('Station', 'Neznámá stanice')
+            
+            # 3. Čas odjezdu
+            plan = train.get('Time', '--:--')
+            
+            # 4. Zpoždění
+            meskani = str(train.get('Delay', 0))
+            if meskani == "None": meskani = "0"
+            
+            # 5. Dopravce (Detektivní práce)
+            # ČD posílá info např: "Os 7640 GW Train Regio a.s."
+            type_info = train.get('TypeInfo', '')
+            dopravce = zjisti_dopravce(type_info, cislo)
 
+            # Výpočet zobrazení aktuálního času
+            if meskani != "0":
+                aktual = f"{plan} (+{meskani})"
+            else:
+                aktual = plan
+
+            # Uložení
             vals = (now, cislo, dopravce, cil, plan, aktual, meskani)
             
             c.execute(f"INSERT INTO zpozdeni VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})", vals)
@@ -67,9 +116,10 @@ def update_data():
 
         conn.commit()
         conn.close()
-        return f"✅ ÚSPĚCH! Uloženo {count} vlaků (včetně detailů).", 200
+        return f"✅ ÚSPĚCH! Staženo {count} vlaků.<br>Poslední vlak: {dopravce} {cislo} do {cil}", 200
+        
     except Exception as e:
-        return f"CHYBA: {str(e)}", 500
+        return f"CHYBA v kódu: {str(e)}", 500
 
 @app.route('/')
 def index():
@@ -78,7 +128,6 @@ def index():
         c = conn.cursor()
         ph = get_placeholder()
         
-        # --- FILTROVÁNÍ ---
         filter_date = request.args.get('date')
         filter_train = request.args.get('train')
         
@@ -86,7 +135,6 @@ def index():
         params = []
 
         if filter_date:
-            # Postgres vs SQLite syntaxe pro datum
             if os.environ.get('DATABASE_URL'):
                 query += " AND cas::text LIKE %s"
             else:
@@ -105,7 +153,6 @@ def index():
         
         data = []
         for row in rows:
-            # Nastavení barev podle zpoždění
             try:
                 m = int(row[6])
                 if m < 5: color = "text-green-600"
@@ -115,14 +162,14 @@ def index():
                 color = "text-gray-600"
 
             data.append({
-                'cas': row[0],        # Čas záznamu
-                'cislo': row[1],      # Číslo vlaku
-                'dopravce': row[2],   # Typ/Dopravce
-                'cil': row[3],        # Cílová stanice
-                'plan': row[4],       # Plánovaný odjezd
-                'aktual': row[5],     # Aktuální odjezd
-                'meskani': row[6],    # Minuty zpoždění
-                'color': color        # Barva pro CSS
+                'cas': row[0],
+                'cislo': row[1],
+                'dopravce': row[2],
+                'cil': row[3],
+                'plan': row[4],
+                'aktual': row[5],
+                'meskani': row[6],
+                'color': color
             })
             
         return render_template('index.html', data=data)
